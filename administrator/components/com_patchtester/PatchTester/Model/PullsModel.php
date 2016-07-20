@@ -295,7 +295,7 @@ class PullsModel extends \JModelDatabase
 		try
 		{
 			// TODO - Option to configure the batch size
-			$pulls = $github->issues->getListByRepository(
+			$issues = $github->issues->getListByRepository(
 				$this->getState()->get('github_user'),
 				$this->getState()->get('github_repo'),
 				null,
@@ -315,51 +315,60 @@ class PullsModel extends \JModelDatabase
 			throw new \RuntimeException(\JText::sprintf('COM_PATCHTESTER_ERROR_GITHUB_FETCH', $e->getMessage()), $e->getCode(), $e);
 		}
 
-		$count = is_array($pulls) ? count($pulls) : 0;
+		$count = is_array($issues) ? count($issues) : 0;
 
 		// If there are no pulls to insert then bail, assume we're finished
-		if ($count === 0 || empty($pulls))
+		if ($count === 0 || empty($issues))
 		{
 			return array('complete' => true);
 		}
 
-		$data = array();
+		$pulls = array();
 
-		foreach ($pulls as $pull)
+		foreach ($issues as $issue)
 		{
-			if (isset($pull->pull_request))
+			if (!isset($issue->pull_request))
 			{
-				// Check if this PR is RTC
-				$isRTC = false;
-
-				foreach ($pull->labels as $label)
-				{
-					if ($label->name === 'RTC')
-					{
-						$isRTC = true;
-
-						break;
-					}
-				}
-
-				// Build the data object to store in the database
-				$pullData = array(
-					(int) $pull->number,
-					$this->getDb()->quote(\JHtml::_('string.truncate', $pull->title, 150)),
-					$this->getDb()->quote(\JHtml::_('string.truncate', $pull->body, 100)),
-					$this->getDb()->quote($pull->pull_request->html_url),
-					(int) $isRTC,
-				);
-
-				$data[] = implode($pullData, ',');
+				// This issue is not a pull request.
+				continue;
 			}
+
+			// Check if this PR is RTC
+			$isRTC = false;
+
+			foreach ($issue->labels as $label)
+			{
+				if ($label->name === 'RTC')
+				{
+					$isRTC = true;
+
+					break;
+				}
+			}
+
+			// Build the data object to store in the database
+			$pullData = array(
+				(int) $issue->number,
+				$this->getDb()->quote(\JHtml::_('string.truncate', $issue->title, 150)),
+				$this->getDb()->quote(\JHtml::_('string.truncate', $issue->body, 100)),
+				$this->getDb()->quote($issue->pull_request->html_url),
+				(int) $isRTC,
+			);
+
+			$pulls[] = implode($pullData, ',');
+		}
+
+		// There were no pulls - only issues.
+		if (0 === count($pulls))
+		{
+			return array('complete' => true);
 		}
 
 		$this->getDb()->setQuery(
 			$this->getDb()->getQuery(true)
 				->insert('#__patchtester_pulls')
 				->columns(array('pull_id', 'title', 'description', 'pull_url', 'is_rtc'))
-				->values($data)
+				->values($pulls)
 		);
 
 		try
